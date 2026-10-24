@@ -1,0 +1,387 @@
+-- [[ UNIFIED EXECUTOR RUNTIME ENGINE - UNC COMPLIANT ]]
+-- [[ OPTIMIZED AIMBOT, ESP & SILENT ANGLE BYPASS ]]
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+-- // Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+
+-- // Local Player Variables
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- // Configuration Architecture
+local Settings = {
+    Aimbot = {
+        Enabled = true,
+        TeamCheck = true,
+        AliveCheck = true,
+        WallCheck = false,
+        AimPart = "Head",
+        SkyAimbot = true, -- Chỉa Camera lên trời nhưng bẻ hướng đạn/Silent Angle
+        Smoothness = 0.15,
+        Prediction = 0.135
+    },
+    FOV = {
+        Visible = true,
+        Radius = 150,
+        Color = Color3.fromRGB(0, 255, 170),
+        Thickness = 1.5,
+        Filled = false,
+        Transparency = 0.8
+    },
+    ESP = {
+        Enabled = true,
+        Boxes = true,
+        Tracers = true,
+        Names = true,
+        TeamCheck = true,
+        BoxColor = Color3.fromRGB(255, 50, 50),
+        TracerColor = Color3.fromRGB(0, 255, 170),
+        NameColor = Color3.fromRGB(255, 255, 255)
+    }
+}
+
+-- // Drawing API Initialization (FOV Circle)
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = Settings.FOV.Visible
+FOVCircle.Radius = Settings.FOV.Radius
+FOVCircle.Color = Settings.FOV.Color
+FOVCircle.Thickness = Settings.FOV.Thickness
+FOVCircle.Filled = Settings.FOV.Filled
+FOVCircle.Transparency = Settings.FOV.Transparency
+FOVCircle.NumSides = 60
+
+-- // Storage Containers for ESP
+local ESPStorage = {}
+
+-- // Helper Functions
+local function GetScreenCenter()
+    return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end
+
+local function IsAlive(player)
+    return player 
+        and player.Character 
+        and player.Character:FindFirstChildOfClass("Humanoid") 
+        and player.Character:FindFirstChildOfClass("Humanoid").Health > 0 
+        and player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function IsOnSameTeam(player)
+    if not Settings.Aimbot.TeamCheck then return false end
+    return player.Team == LocalPlayer.Team
+end
+
+-- // Target Acquisition Logic
+local function GetClosestTarget()
+    local Target = nil
+    local MaxDistance = Settings.FOV.Radius
+    local Center = GetScreenCenter()
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsAlive(player) and not IsOnSameTeam(player) then
+            local AimPart = player.Character:FindFirstChild(Settings.Aimbot.AimPart) or player.Character:FindFirstChild("HumanoidRootPart")
+            if AimPart then
+                local ScreenPos, OnScreen = Camera:WorldToViewportPoint(AimPart.Position)
+                if OnScreen then
+                    local Distance = (Vector2.new(ScreenPos.X, ScreenPos.Y) - Center).Magnitude
+                    if Distance < MaxDistance then
+                        MaxDistance = Distance
+                        Target = player
+                    end
+                end
+            end
+        end
+    end
+    return Target
+end
+
+-- // Anti-Cheat Security Bypass Hooking (Silent Aim & Vector Redirection)
+local OldNamecall
+OldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local Method = getnamecallmethod()
+    local Args = {...}
+
+    if not checkcaller() and Settings.Aimbot.Enabled then
+        if Method == "FindPartOnWithIgnoreList" or Method == "Raycast" or Method == "FindPartOnWithWhitelist" or Method == "FindPartOnWithIgnorelist" then
+            local Target = GetClosestTarget()
+            if Target and Target.Character then
+                local AimPart = Target.Character:FindFirstChild(Settings.Aimbot.AimPart)
+                if AimPart then
+                    if Method == "Raycast" then
+                        -- Redirect direction vector to target position
+                        local Origin = Args[1]
+                        Args[2] = (AimPart.Position - Origin).Unit * 10000
+                        return OldNamecall(self, unpack(Args))
+                    else
+                        -- Override hit position for older raycasting methods
+                        local HitPosition = AimPart.Position
+                        return AimPart, HitPosition, Vector3.new(0, 1, 0), AimPart.Material
+                    end
+                end
+            end
+        end
+    end
+
+    return OldNamecall(self, ...)
+end))
+
+-- // Main Render Loop (Camera Logic & FOV Update)
+RunService.RenderStepped:Connect(function()
+    -- Sync FOV Circle
+    FOVCircle.Position = GetScreenCenter()
+    FOVCircle.Radius = Settings.FOV.Radius
+    FOVCircle.Color = Settings.FOV.Color
+    FOVCircle.Visible = Settings.FOV.Visible
+
+    -- Sky Aimbot & Camera Steering Engine
+    if Settings.Aimbot.Enabled then
+        local Target = GetClosestTarget()
+        if Target and Target.Character then
+            local AimPart = Target.Character:FindFirstChild(Settings.Aimbot.AimPart)
+            if AimPart then
+                if Settings.Aimbot.SkyAimbot then
+                    -- Hướng Camera lên bầu trời để đánh lừa quan sát nhưng vẫn lock bằng Silent Aim
+                    local CurrentPos = Camera.CFrame.Position
+                    local SkyVector = Vector3.new(CurrentPos.X, CurrentPos.Y + 500, CurrentPos.Z)
+                    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(CurrentPos, SkyVector), Settings.Aimbot.Smoothness)
+                else
+                    -- Direct Smooth Lock
+                    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, AimPart.Position), Settings.Aimbot.Smoothness)
+                end
+            end
+        end
+    end
+end)
+
+-- // ESP Framework Engine
+local function CreateESP(player)
+    local Drawables = {
+        Box = Drawing.new("Square"),
+        Tracer = Drawing.new("Line"),
+        Name = Drawing.new("Text")
+    }
+
+    Drawables.Box.Visible = false
+    Drawables.Box.Color = Settings.ESP.BoxColor
+    Drawables.Box.Thickness = 1.5
+    Drawables.Box.Filled = false
+
+    Drawables.Tracer.Visible = false
+    Drawables.Tracer.Color = Settings.ESP.TracerColor
+    Drawables.Tracer.Thickness = 1
+
+    Drawables.Name.Visible = false
+    Drawables.Name.Color = Settings.ESP.NameColor
+    Drawables.Name.Size = 13
+    Drawables.Name.Center = true
+    Drawables.Name.Outline = true
+
+    ESPStorage[player] = Drawables
+end
+
+local function RemoveESP(player)
+    if ESPStorage[player] then
+        for _, obj in pairs(ESPStorage[player]) do
+            obj:Remove()
+        end
+        ESPStorage[player] = nil
+    end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then CreateESP(player) end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then CreateESP(player) end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    RemoveESP(player)
+end)
+
+RunService.RenderStepped:Connect(function()
+    for player, drawables in pairs(ESPStorage) do
+        if Settings.ESP.Enabled and IsAlive(player) and not (Settings.ESP.TeamCheck and IsOnSameTeam(player)) then
+            local RootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            local Head = player.Character:FindFirstChild("Head")
+            
+            if RootPart and Head then
+                local RootPos, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
+                local HeadPos = Camera:WorldToViewportPoint(Head.Position + Vector3.new(0, 0.5, 0))
+                local LegPos = Camera:WorldToViewportPoint(RootPart.Position - Vector3.new(0, 3, 0))
+
+                if OnScreen then
+                    -- 2D Bounding Box
+                    if Settings.ESP.Boxes then
+                        local Height = math.abs(HeadPos.Y - LegPos.Y)
+                        local Width = Height / 1.8
+                        drawables.Box.Size = Vector2.new(Width, Height)
+                        drawables.Box.Position = Vector2.new(RootPos.X - Width / 2, RootPos.Y - Height / 2)
+                        drawables.Box.Color = Settings.ESP.BoxColor
+                        drawables.Box.Visible = true
+                    else
+                        drawables.Box.Visible = false
+                    end
+
+                    -- Snap Lines / Tracers
+                    if Settings.ESP.Tracers then
+                        drawables.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                        drawables.Tracer.To = Vector2.new(RootPos.X, RootPos.Y)
+                        drawables.Tracer.Color = Settings.ESP.TracerColor
+                        drawables.Tracer.Visible = true
+                    else
+                        drawables.Tracer.Visible = false
+                    end
+
+                    -- Name Tags
+                    if Settings.ESP.Names then
+                        drawables.Name.Text = player.Name
+                        drawables.Name.Position = Vector2.new(RootPos.X, HeadPos.Y - 16)
+                        drawables.Name.Visible = true
+                    else
+                        drawables.Name.Visible = false
+                    end
+                else
+                    drawables.Box.Visible = false
+                    drawables.Tracer.Visible = false
+                    drawables.Name.Visible = false
+                end
+            end
+        else
+            drawables.Box.Visible = false
+            drawables.Tracer.Visible = false
+            drawables.Name.Visible = false
+        end
+    end
+end)
+
+-- // Modern Responsive UI Interface Engine
+local ScreenGui = Instance.new("ScreenGui")
+local MainFrame = Instance.new("Frame")
+local UICornerMain = Instance.new("UICorner")
+local UIStrokeMain = Instance.new("UIStroke")
+local Title = Instance.new("TextLabel")
+local Container = Instance.new("Frame")
+local UIListLayout = Instance.new("UIListLayout")
+local OpenBtn = Instance.new("TextButton")
+local UICornerBtn = Instance.new("UICorner")
+local UIStrokeBtn = Instance.new("UIStroke")
+
+-- Target Container GUI Injection
+ScreenGui.Name = "UnifiedAimbotESP_UI"
+ScreenGui.Parent = CoreGui:FindFirstChild("RobloxGui") or LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+-- Open/Close Control Button (Mobile/PC Friendly)
+OpenBtn.Name = "ToggleUIBtn"
+OpenBtn.Parent = ScreenGui
+OpenBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+OpenBtn.Position = UDim2.new(0.02, 0, 0.15, 0)
+OpenBtn.Size = UDim2.new(0, 90, 0, 38)
+OpenBtn.Font = Enum.Font.GothamBold
+OpenBtn.Text = "SPIRITS HUB"
+OpenBtn.TextColor3 = Color3.fromRGB(0, 255, 170)
+OpenBtn.TextSize = 12
+
+UICornerBtn.CornerRadius = UDim.new(0, 8)
+UICornerBtn.Parent = OpenBtn
+
+UIStrokeBtn.Color = Color3.fromRGB(0, 255, 170)
+UIStrokeBtn.Thickness = 1.2
+UIStrokeBtn.Parent = OpenBtn
+
+-- Main Frame Panel
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainFrame.Position = UDim2.new(0.35, 0, 0.22, 0)
+MainFrame.Size = UDim2.new(0, 280, 0, 330)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+UICornerMain.CornerRadius = UDim.new(0, 10)
+UICornerMain.Parent = MainFrame
+
+UIStrokeMain.Color = Color3.fromRGB(0, 255, 170)
+UIStrokeMain.Thickness = 1.5
+UIStrokeMain.Parent = MainFrame
+
+-- Header Title
+Title.Name = "Title"
+Title.Parent = MainFrame
+Title.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+Title.BackgroundTransparency = 1
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "SPIRITS ENGINE v2.5"
+Title.TextColor3 = Color3.fromRGB(0, 255, 170)
+Title.TextSize = 14
+
+-- Controls Container
+Container.Name = "Container"
+Container.Parent = MainFrame
+Container.BackgroundTransparency = 1
+Container.Position = UDim2.new(0, 10, 0, 45)
+Container.Size = UDim2.new(1, -20, 1, -55)
+
+UIListLayout.Parent = Container
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 6)
+
+-- Interactive Toggle Component Creator
+local function AddToggle(labelText, initialState, callback)
+    local Button = Instance.new("TextButton")
+    local Corner = Instance.new("UICorner")
+    local Stroke = Instance.new("UIStroke")
+
+    Button.Parent = Container
+    Button.BackgroundColor3 = initialState and Color3.fromRGB(0, 120, 80) or Color3.fromRGB(30, 30, 38)
+    Button.Size = UDim2.new(1, 0, 0, 36)
+    Button.Font = Enum.Font.GothamMedium
+    Button.Text = labelText .. ": " .. (initialState and "ON" or "OFF")
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.TextSize = 12
+
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = Button
+
+    Stroke.Color = initialState and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(50, 50, 60)
+    Stroke.Thickness = 1
+    Stroke.Parent = Button
+
+    local state = initialState
+    Button.MouseButton1Click:Connect(function()
+        state = not state
+        Button.BackgroundColor3 = state and Color3.fromRGB(0, 120, 80) or Color3.fromRGB(30, 30, 38)
+        Button.Text = labelText .. ": " .. (state and "ON" or "OFF")
+        Stroke.Color = state and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(50, 50, 60)
+        callback(state)
+    end)
+end
+
+-- Render Options UI Controls
+AddToggle("Aimbot Bẻ Hướng", Settings.Aimbot.Enabled, function(v) Settings.Aimbot.Enabled = v end)
+AddToggle("Chỉa Tâm Bầu Trời", Settings.Aimbot.SkyAimbot, function(v) Settings.Aimbot.SkyAimbot = v end)
+AddToggle("Hiển Thị Vòng FOV", Settings.FOV.Visible, function(v) Settings.FOV.Visible = v end)
+AddToggle("Khung Khung ESP Box", Settings.ESP.Boxes, function(v) Settings.ESP.Boxes = v end)
+AddToggle("Đường Dẫn Tracer", Settings.ESP.Tracers, function(v) Settings.ESP.Tracers = v end)
+AddToggle("Lọc Bỏ Đồng Đội", Settings.Aimbot.TeamCheck, function(v) 
+    Settings.Aimbot.TeamCheck = v 
+    Settings.ESP.TeamCheck = v 
+end)
+
+-- UI Visibility Control
+OpenBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+print("[UNC ENGINE]: Aimbot & ESP System Initialized Successfully.")
